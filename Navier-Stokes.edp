@@ -1,0 +1,332 @@
+//流体レザバー(Circle)
+
+/*---------------------変数------------------------------------*/
+real tau=5.0;//過渡時間
+real Tf=10500.0;//ダイナミクスを走らせる時
+real dt=0.2;//時間間隔
+int DataLength=Tf/tau;//レザバーデータの長さ
+real Re=100.0;//レイノルズ数
+int S=77;//格子点の総数
+int inputnumber=9;//入力データ番号
+/*---------------------------------------------------------------*/
+
+/*------------------------関数の作成-------------------------------*/
+//乱数の生成(a,b]
+// func real rand(real a,real b,int n){
+//     srandomdev();
+//     int Rand=(random()%n);//0~n-1までの乱数
+//     real R=Rand/real(n-1);//0~1に正規化
+//     return a+(b-a)*R;
+// }
+/*----------------------------------------------------------------*/
+
+/*---------------------------------------入力データの作成---------------------------------------*/
+// //乱数の作成
+// real[int] Z(DataLength+1);//sgnを利用するために長さを+1しておく
+// ofstream inputfile("answer/input.dat");
+// for(int i=0;i<=DataLength;i++){
+//     Z(i)=rand(0.99,1.01,1000);//乱数を1/1000の位まで出す
+//     ofstream inputfile("answer/input.dat",append);
+//     inputfile<<i<<" "<<Z(i)<<endl;
+// } 
+
+//入力データの読み込み
+real[int] Z(DataLength+1);
+ifstream readfile("inputdata/randomset"+string(inputnumber)+".txt");
+for(int k=0;k<DataLength;k++){
+    readfile>>Z(k);
+
+}
+
+/*-------------------------------------------------------------------------------------------*/
+
+/*-----------------------解析領域 メッシュ分割-------------------------*/
+int wall=1,slide=2,inflow=4,outflow=5;
+real R=0.5;
+real L=7.5;
+int sep=30;//メッシュを切る定数
+
+border ba(t=0,1){x=(4*t-1)*L;y=-L;label=slide;};//下
+border bb(t=0,1){x=3*L;y=(2*t-1)*L;label=outflow;};//右
+border bc(t=0,1){x=(3-4*t)*L;y=L;label=slide;};//上
+border bd(t=0,1){x=-L;y=(1-2*t)*L;label=inflow;};//左
+//流体が流れない領域の作成
+border cc(t=0,2*pi){x=R*cos(t);y=R*sin(t);label=wall;};
+mesh Th=buildmesh(ba(2*sep)+bb(sep)+bc(2*sep)+bd(sep)+cc(-80));
+cout<<"Vertex,"<<Th.nv<<endl;
+cout<<"Element,"<<Th.nt<<endl;
+/*------------------------------------------------------------------*/
+
+/*-------------------------有限要素空間の作成------------------------*/
+//有限要素空間の作成
+fespace Vh(Th,[P1,P1]);
+fespace Qh(Th,P1);
+Vh [u1,u2],[v1,v2],[up1,up2];//[up1,up2]はu^n-1
+Qh p,q;
+/*----------------------------------------------------------------*/
+
+
+/*--------------------------NS方程式の弱形式------------------------*/
+real zt;
+real delta0=0.1;
+problem NS([u1,u2,p],[v1,v2,q],solver=UMFPACK)=
+int2d(Th)(u1*v1+u2*v2
+    +(dt/Re)*(dx(u1)*dx(v1)+dy(u1)*dy(v1)+dx(u2)*dx(v2)+dy(u2)*dy(v2))//(∇u1,∇u2)・(∇v1,∇v2)
+    -dt*(dx(v1)+dy(v2))*p
+    -dt*(dx(u1)+dy(u2))*q
+    -(dx(p)*dx(q)+dy(p)*dy(q))*(hTriangle^2*delta0*dt)//安定化項
+    )
+-int2d(Th)(convect([up1,up2],-dt,up1)*v1+convect([up1,up2],-dt,up2)*v2)
+    +on(slide,u2=0.0)
+    +on(inflow,u1=zt,u2=0.0)
+    +on(wall,u1=0.0,u2=0.0);
+/*---------------------------------------------------------------*/
+
+[u1,u2]=[0,0];//初期条件
+
+int k=0;//データ番号
+// int filenumber=0;
+
+//一応データを取っておく
+matrix AnswerReservoirMatrix(DataLength+1,3*S+1);//Matrix for Prediction Value
+ofstream ReservoirMatrixOut("Dataset/input="+string(inputnumber)+"/Re="+string(Re)+"/MatrixRe"+string(Re)+"Input"+string(inputnumber)+".csv");
+
+//流体の計算
+for(real i=0;i<=Tf;i+=dt){
+    zt=Z(k);
+    // zt=1.0;
+    cout<<k<<","<<i<<endl;
+    cout<<"Re="<<Re<<endl;
+    cout<<"input="<<Z(k)<<endl;
+    cout<<"input_number="<<inputnumber<<endl;
+
+    //流体の計算反復
+    [up1,up2]=[u1,u2];
+    NS; 
+    //データをとる
+    if(abs(i-(k+1)*tau)<10.e-5){//データを取る時刻の設定,tauの倍数の時にデータが取られる
+        //各時刻における座標の取得.座標の指定
+        ofstream ReservoirMatrixOut("Dataset/input="+string(inputnumber)+"/Re="+string(Re)+"/MatrixRe"+string(Re)+"Input"+string(inputnumber)+".csv",append);
+        AnswerReservoirMatrix(k,0)=1.0;
+        // データの書き込み
+        ReservoirMatrixOut<<1.0;
+        for(int number=0;number<S;number++){
+            real x1=number%11+0.5;
+            real y1=int(number/11)-3;   
+            AnswerReservoirMatrix(k,3*number+1)=u1(x1,y1);//x_k^{3l+1}
+            AnswerReservoirMatrix(k,3*number+2)=u2(x1,y1);//x_k^{3l+2}
+            AnswerReservoirMatrix(k,3*number+3)=p(x1,y1);//x_k^{3l+3}
+            //データの書き込み
+            ReservoirMatrixOut<<","<<u1(x1,y1)<<","<<u2(x1,y1)<<","<<p(x1,y1);
+        }
+        ReservoirMatrixOut<<endl;
+        k+=1;//取るデータを更新
+    }
+    //結果の表示
+    // plot(p,grey=true,fill=true);
+    // plot([u1,u2],fill=true,grey=true);//ps="Move_cylinder/"+filename+".ps");
+}
+
+
+// /*===============================行列と正解データの作成===============================================*/
+// int T0=200;//Transiant time of Reservoir レザバーの過渡時間
+// int LearnLength=1399;//Length of training data　学習に用いるデータの終わり
+
+// //Create a matrix to be used for learning
+// matrix ReservoirMatrix(LearnLength-T0+1,3*S+1);
+// for(int i=T0;i<=LearnLength;i++){
+//     for(int j=0;j<3*S+1;j++){
+//         ReservoirMatrix(i-T0,j)=AnswerReservoirMatrix(i,j);
+//     }
+// }
+// /*===================================正解データの作成=====================================*/
+// //NARMAモデルの作成
+// int NarmaLength=7;
+
+// matrix Narma(DataLength+1,NarmaLength-2);
+// //正解データの読み込み
+// for(int NARMA=2;NARMA<NarmaLength;NARMA++){
+//     ifstream NARMAfile("NARMA/NARMA"+string(NARMA)+"/input"+string(inputnumber)+".csv");
+//     for(int i=0;i<DataLength;i++){
+//         NARMAfile>>Narma(i,NARMA-2);
+//     }   
+// }
+
+// int prednumber=NarmaLength-2;//学習する正解データの数
+// matrix TT(LearnLength-T0+1,prednumber);//正解データ
+// //教師データの切り出し
+// for(int j=0;j<prednumber;j++){
+//     for(int i=T0;i<=LearnLength;i++){
+//         TT(i-T0,j)=Narma(i,j);
+//     }
+// }
+// /*=====================================================================================*/
+
+// // To create simultaneous equations（連立方程式の作成)
+// matrix M=ReservoirMatrix'*ReservoirMatrix;//(3*S+1,3*S+1)
+// // for(int i=0;i<3*S+1;i++){
+// //     cout<<M(i,i)<<endl;
+// // }
+// /*-----------Create identity matrix-----------------*/
+// //Define λI
+// real lambda=10^-5;
+// for(int i=0;i<3*S+1;i++){
+//     M(i,i)+=lambda;//diagonal component is λ=10^-5
+// }
+// /*-------------------------------------------------*/
+
+// matrix b=ReservoirMatrix'*TT;
+// matrix Wout(3*S+1,prednumber);//The optimize Weight
+// /*==============================================================================================*/
+
+// //Explanation of Algorithm that simultaneous equations (M)Wout=b is solved.
+
+// /*=================================行列ピボット================================================*/
+// real[int,int] cha(3*S+1,3*S+1);//入れ替え用の配列
+// matrix P(3*S+1,3*S+1);//元に戻すための単位変換行列
+// for(int i=0;i<3*S+1;i++){
+//     for(int j=0;j<3*S+1;j++){
+//         P(i,j)=0.0;
+//     }
+//     P(i,i)=1.0;
+// }
+// //ピボットの軸探索
+// int i=0;
+// while(i<3*S+1){
+//     real Border=abs(M(i,i));
+//     int pivod=i;
+//     for(int k=i+1;k<3*S+1;k++){
+//         if(abs(M(k,i))>Border){
+//             Border=abs(M(k,i));
+//             pivod=k;
+//         }
+//     }
+//     //ピボットの実行
+//     for(int j=0;j<3*S+1;j++){
+//         //元行列
+//         cha(j,0)=M(pivod,j);
+//         M(pivod,j)=M(i,j);
+//         M(i,j)=cha(j,0);
+//         //変換行列
+//         cha(j,1)=P(pivod,j);
+//         P(pivod,j)=P(i,j);
+//         P(i,j)=cha(j,1);
+//     }
+//     real maxdiag=M(i,i);//ピボット後の対角成分
+//     if(maxdiag!=0.0){
+//         for(int j=0;j<3*S+1;j++){
+//             M(i,j)=M(i,j)/maxdiag;
+//             P(i,j)=P(i,j)/maxdiag;
+//         }
+//     }
+//     i++;
+// }
+// //答えベクトルの変換
+// b=P*b;
+// /*==============================================================================================*/
+
+
+// /*======================LU decompose's Algorithm=================*/
+// /*Step1　
+// Decompose Coefficient matrix into upper triangular matrix(上三角行列) and lower triangular matrix(下三角行列)*/
+
+// matrix LUL(3*S+1,3*S+1);//lower triangular matrix(下三角行列)
+// matrix LUU(3*S+1,3*S+1);//upper triangular matrix(上三角行列)
+
+// for(int j=0;j<3*S+1;j++){
+//     LUU(j,j)=1.0;//u(i,i)=1 diagonal component of U is 1.
+//     for(int i=j;i<3*S+1;i++){
+//         if(j==0){
+//             LUL(i,j)=M(i,j);
+//         }else{
+//             //Lの合計値
+//             real sumL=0;
+//             for(int sumnumber=0;sumnumber<j;sumnumber++){
+//                 sumL+=LUL(j-1,sumnumber)*LUU(sumnumber,i);
+//             }
+//             LUU(j-1,i)=(M(j-1,i)-sumL)/LUL(j-1,j-1);//asymptotic expression (漸化式) of upper triangular matrix
+
+//             //Uの合計値
+//             real sumU=0;
+//             for(int sumnumber=0;sumnumber<=j;sumnumber++){
+//                 sumU+=LUL(i,sumnumber)*LUU(sumnumber,j);
+//             }
+//             LUL(i,j)=M(i,j)-sumU;//asymptotic expression (漸化式) of lower triangular matrix
+//         }
+//     }
+// }
+// matrix by(3*S+1,prednumber);//define y of Ly=b
+
+// for(int datanumber=0;datanumber<prednumber;datanumber++){
+    
+//     //Ly=b
+//     for(int j=0;j<3*S+1;j++){
+//         real sumby=0;
+//         for(int i=0;i<j;i++){
+//             sumby+=LUL(j,i)*by(i,datanumber);
+//         }
+//         by(j,datanumber)=(b(j,datanumber)-sumby)/LUL(j,j);//asymptotic expression (漸化式) of computing Ly=b
+//     }
+//     //Ux=y
+//     for(int i=3*S+1-1;i>=0;i--){
+//         real sumx=0;
+//         for(int k=i+1;k<3*S+1;k++){
+//             sumx+=LUU(i,k)*Wout(k,datanumber);
+//         }
+//         Wout(i,datanumber)=by(i,datanumber)-sumx;//asymptotic expression (漸化式) of computing Ux=y
+//     }
+// /*========================================================*/
+// // //反復法（ガウスザイデル法）
+// // real[int] X(3*S+1);
+// // int count=0;
+// // while(1){
+// //     for(int k=0;k<3*S+1;k++){
+// //         real sum=0.0;
+// //         for(int i=0;i<3*S+1;i++){
+// //             if(i!=k){
+// //                 sum+=M(k,i)*X(i);
+// //             }
+// //         }
+// //         Wout(k,datanumber)=X(k);
+// //         X(k)=(b(k,datanumber)-sum)/M(k,k);
+// //     }
+    
+// //     count++;
+// //     if(count>10^5){
+// //         break;
+// //     }
+// // }
+//     matrix haty=AnswerReservoirMatrix*Wout;//レザバー計算による予測値
+
+//     ofstream WOUT("Dataset/input="+string(inputnumber)+"/Re="+string(Re)+"/W_out"+string(datanumber)+".dat");//入力データ書き出しファイルの作成
+
+//     /*===================データの書き込み====================*/
+//     real error=0.0;
+//     real ErrorLength=0;
+
+//     real Predicterror=0.0;
+//     real PredLength=0;
+//     //予測値のファイル書込み
+//     for(int i=0;i<DataLength;i++){
+//         ofstream WOUT("Dataset/input="+string(inputnumber)+"/Re="+string(Re)+"/W_out"+string(datanumber)+".dat",append);
+//         WOUT<<i<<" "<<haty(i,datanumber)<<endl;//予測値の書き込み
+//         real squa=(haty(i,datanumber)-Narma(i,datanumber))^2;
+//         if(i>=T0 && i<=LearnLength){
+//             ErrorLength+=Narma(i,datanumber)^2;
+//             error+=squa;
+//         }//学習エラーの計算
+
+//         if(i>LearnLength){
+//             PredLength+=Narma(i,datanumber)^2;
+//             Predicterror+=squa;   
+//         }
+
+//     }
+//     ofstream ErrorResult("Dataset/input="+string(inputnumber)+"/Error/Error_NARMA"+string(datanumber+2)+".dat",append);
+//     ErrorResult<<Re<<" "<<error/ErrorLength<<endl;
+
+//     ofstream ErrorResultPred("Dataset/input="+string(inputnumber)+"/Error/Error_NARMA"+string(datanumber+2)+"_pred.dat",append);
+//     ErrorResultPred<<Re<<" "<<Predicterror/PredLength<<endl;
+//     /*===================================================*/
+// }
+
