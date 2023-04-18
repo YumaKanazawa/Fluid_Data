@@ -108,6 +108,7 @@ for(real i=0;i<=Tf;i+=dt){
             real x1=(number%11+0.5);
             real y1=(int(number/11)-3);
 
+            //行列データは一旦退避
             // AnswerReservoirMatrix(k,3*number+1)=u1(x1,y1);//x_k^{3l+1}
             // AnswerReservoirMatrix(k,3*number+2)=u2(x1,y1);//x_k^{3l+2}
             // AnswerReservoirMatrix(k,3*number+3)=p(x1,y1);//x_k^{3l+3}
