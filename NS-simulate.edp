@@ -1,0 +1,125 @@
+load "iovtk"//using paraview's command
+
+//流体レザバーのシミュレーション
+/*---------------------マクロと変数--------------------------------*/
+real Tf=1000;//10500.0;//ダイナミクスを走らせる時間
+real tau=5.0;//流体の反映時間
+real dt=0.2;//時間間隔
+real Re;//レイノルズ数
+cout<<"Re=?";
+cin>>Re;
+/*---------------------------------------------------------------*/
+
+/*-----------------------解析領域 メッシュ分割-------------------------*/
+real R=0.5;
+int wall=1,slide=2,inflow=4,outflow=5;
+// int wall=3,slide=6,inflow=7,outflow=8;
+real L=7.5;
+int sep=40;//メッシュを切る定数
+// int carsep=5;
+
+string data;
+cout<<"Shape Name=";
+cin>>data;
+system("mkdir -p Move/"+data+"/Re="+string(Re));
+
+real maxx=3*L,minx=-L;
+real maxy=L,miny=-L;
+
+// // 本来の全領域
+// border ba(t=maxy,miny){x = minx; y = t; label = inflow;};//左
+// border bb(t=minx,maxx){x = t; y = miny; label = slide;};//下
+// border bc(t=miny,maxy){x = maxx; y = t; label = outflow;};//右
+// border bd(t=maxx,minx){x = t; y = maxy; label = slide;};//上
+// border cc(t=0.0,2*pi){x =R*cos(t); y = R*sin(t); label = wall;};//円柱
+// mesh Th=buildmesh(ba(2*sep)+bb(sep)+bc(2*sep)+bd(sep)+cc(-80));
+
+// border car1(t=0,1){x=-0.5*L+t*L;y=-0.5*L;label=wall;};
+// // border cir(t=pi,2*pi){x=0.5*(cos(t)-(10/3)*0.3);y=0.5*(sin(t)-(10/3)*0.5*L);label=wall;};//車輪
+// border car2(t=0,1){x=0.5*L;y=-0.5*L+t*0.2*L;label=wall;};
+// border car3(t=0,1){x=0.5*L-t*0.2*L;y=-0.3*L;label=wall;};
+// border car4(t=0,1){x=0.3*L-t*0.2*L;y=-0.3*L+t*0.3*L;label=wall;};
+// border car5(t=0,1){x=0.1*L-t*0.2*L;y=0.0*L;label=wall;};
+// border car6(t=0,1){x=-0.1*L-0.2*L*t;y=0.0*L-t*0.3*L;label=wall;};
+// border car7(t=0,1){x=-0.3*L-t*0.2*L;y=-0.3*L;label=wall;};
+// border car8(t=0,1){x=-0.5*L;y=-0.3*L-t*0.2*L;label=wall;};
+// mesh Th=buildmesh(ba(2*sep)+bb(sep)+bc(2*sep)+bd(sep)+car1(-3*carsep)+car2(-carsep)+car3(-carsep)+car4(-1.5*carsep)+car5(-carsep)+car6(-1.5*carsep)+car7(-carsep)+car8(-carsep));
+
+string meshdata="msh/mesh_"+data+".msh";
+mesh Th=readmesh(data+"/mesh.msh");
+
+plot(Th,ps=data+"demo.eps",wait=true);
+/*---------------------------------------------------------------*/
+
+/*-------------------------有限要素空間の作成------------------------*/
+//有限要素空間の作成
+fespace Vh(Th,[P1,P1]);
+fespace Qh(Th,P1);
+Vh [u1,u2],[v1,v2],[up1,up2];//[up1,up2]はu^n-1
+Qh p,q;
+/*----------------------------------------------------------------*/
+
+/*--------------------------NS方程式の弱形式------------------------*/
+real zt;
+real delta0=0.0;
+problem NS([u1,u2,p],[v1,v2,q],solver=UMFPACK)=
+int2d(Th)(u1*v1+u2*v2
+    +(dt/Re)*(dx(u1)*dx(v1)+dy(u1)*dy(v1)+dx(u2)*dx(v2)+dy(u2)*dy(v2))//(∇u1,∇u2):(∇v1,∇v2)
+    -dt*(dx(v1)+dy(v2))*p
+    -dt*(dx(u1)+dy(u2))*q
+    -(dx(p)*dx(q)+dy(p)*dy(q))*(hTriangle^2*delta0*dt)//安定化項
+    )
+-int2d(Th)(convect([up1,up2],-dt,up1)*v1+convect([up1,up2],-dt,up2)*v2)
+    +on(slide,u2=0.0)
+    +on(inflow,u1=zt,u2=0.0)
+    +on(wall,u1=0.0,u2=0.0);
+/*---------------------------------------------------------------*/
+
+[u1,u2]=[0,0];//初期条件
+// cout<<Th.nv<<endl;
+
+//流体の計算
+string filename;
+// int k=0;
+
+real avevortex=0.0;
+
+for(int i=0;i<=Tf;i+=1){
+    cout<<"Re="<<Re<<endl;
+    cout<<"i="<<i<<endl;
+    zt=1.0;
+
+    //結果の表示
+    if(i<10){
+        filename="0000";
+    }else if(i>=10 &&i<100){
+        filename="000";
+    }else if(i>=100 &&i<1000){
+        filename="00";
+    }else{
+        filename="0";
+    }
+
+    NS; 
+
+    //渦度の計算
+    // real vortex=dt*sqrt(int2d(Th) (dx(u2)-dy(u1))^2);
+
+    // if((tau*(k+1)-i)<0.01){
+    //     k++;
+    // }
+    // plot(p,grey=true,fill=true);
+
+    // avevortex+=vortex*dt;
+    // cout<<vortex<<endl;
+
+
+    plot([u1,u2],fill=true,grey=true,ps="Move/"+data+"/Re="+string(Re)+"/fig"+filename+string(i)+".ps",cmm="Re="+string(Re)+"\n t="+string(i*dt));
+    // plot(u1,u2,fill=true,grey=true,ps="Move/"+data+"/Re="+string(Re)+"/fig"+filename+string(i)+".ps");
+    savevtk("Move/"+data+"/Re="+string(Re)+"/Fluid"+string(i)+".vtk",Th,[u1,u2],dataname="Fluid_vector");
+    //流体の計算反復
+    [up1,up2]=[u1,u2];
+}
+cout<<"V="<<avevortex/(Tf+1)<<endl;
+//最後のデータを取得する→次の初期条件に適用する
+//savesol("Fluid_vector.sol",Th,u1,u2);
