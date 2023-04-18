@@ -1,0 +1,131 @@
+//流体レザバー(半領域)
+/*---------------------変数------------------------------------*/
+real tau=5.0;//過渡時間
+real Tf=10500.0;//ダイナミクスを走らせる時
+real dt=0.2;//時間間隔
+int DataLength=Tf/tau;//レザバーデータの長さ
+real Re=1000;//レイノルズ数
+int S=77;//格子点の総数
+int input=0;//入力データ番号
+/*---------------------------------------------------------------*/
+
+/*---------------------------------------入力データの作成---------------------------------------*/
+//入力データの読み込み
+real[int] Z(DataLength+1);
+ifstream readfile("../inputdata/randomset"+string(input)+".txt");
+for(int k=0;k<DataLength;k++){
+    readfile>>Z(k);
+}
+/*-------------------------------------------------------------------------------------------*/
+
+/*-----------------------解析領域 メッシュ分割-------------------------*/
+// real R=0.5;
+int wall=1,slide=2,inflow=4,outflow=5;
+// real L=7.5;
+// int sep=40;//メッシュを切る定数
+
+string dataname="half_curl";
+// system("mkdir -p Move/"+data+"/Re="+string(Re));
+system("mkdir -p /input="+input+"/Re="+Re);
+
+// real maxx=3*L,minx=-L;
+// real maxy=L,miny=0.0;
+
+// //上半分でカルマン渦を発生させない領域
+// border ba(t=maxy,miny){x = minx; y = t; label = inflow;};//左
+
+// border bb1(t=minx,0-R){x = t; y = miny; label = slide;};//下
+// border bb2(t=pi,0){x =R*cos(t); y = R*sin(t); label = wall;};//下
+// border bb3(t=0+R,maxx){x = t; y = miny; label = slide;};//下
+
+// border bc(t=miny,maxy){x = maxx; y = t; label = outflow;};//右
+// border bd(t=maxx,minx){x = t; y = maxy; label = slide;};//上
+// // border cc(t=0.0,2*pi){x =R*cos(t); y = R*sin(t); label = wall;};//円柱
+mesh Th=readmesh("half_curl_mesh.msh");
+// string meshdata="msh/mesh_"+data+".msh";
+// mesh Th=readmesh(meshdata);
+// plot(Th,ps="demo.eps",wait=true);
+/*---------------------------------------------------------------*/
+
+/*-------------------------有限要素空間の作成------------------------*/
+//有限要素空間の作成
+fespace Vh(Th,[P1,P1]);
+fespace Qh(Th,P1);
+Vh [u1,u2],[v1,v2],[up1,up2];//[up1,up2]はu^n-1
+Qh p,q;
+/*----------------------------------------------------------------*/
+
+/*--------------------------NS方程式の弱形式------------------------*/
+real zt;
+real delta0=0.1;
+problem NS([u1,u2,p],[v1,v2,q],solver=UMFPACK)=
+int2d(Th)(u1*v1+u2*v2
+    +(dt/Re)*(dx(u1)*dx(v1)+dy(u1)*dy(v1)+dx(u2)*dx(v2)+dy(u2)*dy(v2))//(∇u1,∇u2)・(∇v1,∇v2)
+    -dt*(dx(v1)+dy(v2))*p
+    -dt*(dx(u1)+dy(u2))*q
+    -(dx(p)*dx(q)+dy(p)*dy(q))*(hTriangle^2*delta0*dt)//安定化項
+    )
+-int2d(Th)(convect([up1,up2],-dt,up1)*v1+convect([up1,up2],-dt,up2)*v2)
+    +on(slide,u2=0.0)
+    +on(inflow,u1=zt,u2=0.0)
+    +on(wall,u1=0.0,u2=0.0);
+/*---------------------------------------------------------------*/
+
+[u1,u2]=[0,0];//初期条件
+// cout<<Th.nv<<endl;//number of total vertex
+
+//一応データを取っておく
+// matrix AnswerReservoirMatrix(DataLength+1,3*S+1);//Matrix for Prediction Value
+
+ofstream ReservoirMatrixOut("input="+string(input)+"/Re="+string(Re)+"/MatrixRe"+string(Re)+"Input"+string(input)+".csv");
+
+
+//流体の計算
+int k=0;
+
+for(int i=0;i<=Tf;i+=1){
+    zt=Z(k);
+    // zt=1.0;
+    cout<<k<<","<<i<<endl;
+    cout<<"Re="<<Re<<endl;
+    cout<<"input="<<zt<<endl;
+
+    //流体の計算反復
+    [up1,up2]=[u1,u2];
+    NS; 
+
+    //データをとる
+    if(abs(i-(k+1)*tau)<10.e-5){//データを取る時刻の設定,tauの倍数の時にデータが取られる
+        //各時刻における座標の取得.座標の指定
+        ofstream ReservoirMatrixOut("input="+string(input)+"/Re="+string(Re)+"/MatrixRe"+string(Re)+"Input"+string(input)+".csv",append);
+        // AnswerReservoirMatrix(k,0)=1.0;
+        // データの書き込み
+        ReservoirMatrixOut<<1.0;
+        for(int number=0;number<S;number++){
+            real x1=number/7+0.5;//格子点のx座標計算
+            real y1=number%7-3;//格子点のy座標計算
+
+            real ru1,ru2,rp;//実際に格納するデータの計算
+            if(y1<0.0){//格子点のy座標が負の時
+                //座標の反転
+                ru1=u1(x1,-y1);
+                ru2=-u2(x1,-y1);
+                rp=p(x1,-y1);
+            }else{//格子点のy座標が正の時
+                ru1=u1(x1,y1);
+                ru2=u2(x1,y1);
+                rp=p(x1,y1);
+            }
+            // cout<<"u2="<<a<<",(x,y)="<<x1<<","<<y1<<endl;
+            ReservoirMatrixOut<<","<<ru1<<","<<ru2<<","<<rp;
+            // cout<<"i="<<number<<",(x,y)="<<x1<<","<<y1<<endl;
+        }
+        
+        ReservoirMatrixOut<<endl;
+        k+=1;//取るデータを更新
+    }
+    //結果の表示
+    // plot(p,grey=true,fill=true);
+    // plot([u1,u2],fill=true,grey=true);//ps="Move_cylinder/"+filename+".ps");
+    
+}

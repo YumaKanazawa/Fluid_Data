@@ -1,0 +1,86 @@
+//流体レザバー(半領域)
+/*---------------------マクロと変数--------------------------------*/
+real Tf=10500.0;//ダイナミクスを走らせる時間
+real tau=5.0;//流体の反映時間
+real dt=0.2;//時間間隔
+real Re=10000;//レイノルズ数
+/*---------------------------------------------------------------*/
+
+/*-----------------------解析領域 メッシュ分割-------------------------*/
+int wall=1,slide=2,inflow=4,outflow=5;
+
+mesh Th=readmesh("half_curl_mesh.msh");
+// string meshdata="msh/mesh_"+data+".msh";
+// mesh Th=readmesh(meshdata);
+// plot(Th,ps="demo.eps",wait=true);
+/*---------------------------------------------------------------*/
+
+/*-------------------------有限要素空間の作成------------------------*/
+//有限要素空間の作成
+fespace Vh(Th,[P1,P1]);
+fespace Qh(Th,P1);
+Vh [u1,u2],[v1,v2],[up1,up2];//[up1,up2]はu^n-1
+Qh p,q;
+/*----------------------------------------------------------------*/
+
+/*--------------------------NS方程式の弱形式------------------------*/
+real zt;
+real delta0=0.1;
+problem NS([u1,u2,p],[v1,v2,q],solver=UMFPACK)=
+int2d(Th)(u1*v1+u2*v2
+    +(dt/Re)*(dx(u1)*dx(v1)+dy(u1)*dy(v1)+dx(u2)*dx(v2)+dy(u2)*dy(v2))//(∇u1,∇u2)・(∇v1,∇v2)
+    -dt*(dx(v1)+dy(v2))*p
+    -dt*(dx(u1)+dy(u2))*q
+    -(dx(p)*dx(q)+dy(p)*dy(q))*(hTriangle^2*delta0*dt)//安定化項
+    )
+-int2d(Th)(convect([up1,up2],-dt,up1)*v1+convect([up1,up2],-dt,up2)*v2)
+    +on(slide,u2=0.0)
+    +on(inflow,u1=zt,u2=0.0)
+    +on(wall,u1=0.0,u2=0.0);
+/*---------------------------------------------------------------*/
+
+[u1,u2]=[0,0];//初期条件
+// cout<<Th.nv<<endl;
+
+//流体の計算
+string filename;
+// int k=0;
+
+real avevortex=0.0;
+
+for(int i=0;i<=Tf;i+=1){
+    cout<<"Re="<<Re<<endl;
+    cout<<"i="<<i<<endl;
+    zt=1.0;
+
+    // //結果の表示
+    // if(i<10){
+    //     filename="0000";
+    // }else if(i>=10 &&i<100){
+    //     filename="000";
+    // }else if(i>=100 &&i<1000){
+    //     filename="00";
+    // }else{
+    //     filename="0";
+    // }
+
+    NS; 
+
+    //渦度の計算
+    // real vortex=dt*sqrt(int2d(Th) (dx(u2)-dy(u1))^2);
+
+    // if((tau*(k+1)-i)<0.01){
+    //     k++;
+    // }
+    // plot(p,grey=true,fill=true);
+
+    
+
+    plot([u1,u2],fill=true,grey=true);
+    //流体の計算反復
+    [up1,up2]=[u1,u2];
+    
+}
+// cout<<"V="<<avevortex/(Tf+1)<<endl;
+//最後のデータを取得する→次の初期条件に適用する
+//savesol("Fluid_vector.sol",Th,u1,u2);
