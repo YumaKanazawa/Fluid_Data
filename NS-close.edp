@@ -19,7 +19,8 @@ func real rand(real a,real b,int n){
     real R=Rand/real(n-1);//0~1に正規化
     return a+(b-a)*R;
 }
-func real[int] scale(real k,real[int] u,int length){
+
+func real[int] scale(int length,real[int] u,real k){
     real[int] ret(length);
 
     //最大，最小値の探索
@@ -40,50 +41,85 @@ func real[int] scale(real k,real[int] u,int length){
 
     return ret;
 }
+
 func real[int] inputdata(int input){
     //入力データの読み込み
     real[int] Z(DataLength+1);
     ifstream readfile("../reservoir_data/inputdata/randomset"+string(inputnumber)+".csv");
     for(int k=0;k<DataLength;k++){
-        readfile>>Z(k);
+        // readfile>>Z(k);
+        Z(k)=rand(0.99,1.01,1000);
     }
     return Z;
 }
 
-func real[int] Answer(int nr,real[int] Z){
+func real[int] Answer(int n,int inputnumber){
     //NARMAの作成
+    real[int] s=scale(DataLength,inputdata(inputnumber),0.2);
+
     real[int] NARMA(DataLength+1);
     for(int i=0;i<DataLength;i++){
-        real[int] scaleinput=scale(0.1,Z,DataLength);
-
         if(i<n){
             NARMA(i)=0.0;
         }else{
-            real na=0.0;
             if(n==2){
-                na=0.4*NARMA(i-1)+0.4*NARMA(i-1)*NARMA(i-2)+0.6*scaleinput(i-1)^3+0.1;
+                NARMA(i)=0.4*NARMA(i-1)+0.4*NARMA(i-1)*NARMA(i-2)+0.6*s(i-1)^3+0.1;
             }else{
                 real sum=0.0;
                 for(int sumnum=0;sumnum<=n;sumnum++){sum+=NARMA(i-sumnum);}
 
-                na=0.3*NARMA(i-1)+0.05*NARMA(i-1)*sum+1.5*scaleinput(i-1-n)*scaleinput(i-1);
+                NARMA(i)=0.3*NARMA(i-1)+0.05*NARMA(i-1)*sum+1.5*s(i-1-n)*s(i-1)+0.1;
             }
-            na=NARMA(i+1);
         }
     }
     return NARMA;
 }
-/*----------------------------------------------------------------*/
 
-/*---------------------------------------入力データの作成---------------------------------------*/
-real[int] Z=inputdata(inputnumber);//入力データ
-real[int] NARMA=Answer(n,Z);//正解データ
-/*-------------------------------------------------------------------------------------------*/
+func real[int] scaleNARMA(int n,int length,real[int] u){
+    real[int] ret(length);
+
+    // //最大，最小値の探索
+    // real minu=10000;
+    // real maxu=-10000;
+    // for(int i=0;i<length;i++){
+    //     if(u(i)<minu){
+    //         minu=u(i);
+    //     }
+    //     if(u(i)>maxu){
+    //         maxu=u(i);
+    //     }
+    // }
+
+    // for(int i=0;i<length;i++){
+    //     ret(i)=(u(i)-2*minu)/(maxu-minu);
+    // }
+
+    real l=0.0,sum=0.0;
+    real avesq=0.0;
+    for(int i=0;i<length;i++){
+        sum+=u(i);
+        avesq+=(u(i))^2;
+        l+=1.0;
+    }
+
+    real ave=sum/l;
+    real var=avesq/l-ave^2;
+
+    for(int i=0;i<length;i++){
+        if(i<n){
+            ret(i)=u(i);
+        }else{
+            ret(i)=(u(i)-ave)/sqrt(var);
+        }
+    }
+    return ret;
+}
+/*----------------------------------------------------------------*/
 
 /*-----------------------解析領域 メッシュ分割-------------------------*/
 int wall=1,slide=2,inflow=4,outflow=5;
 real R=0.5;
-real L=7.5;
+real L=1.1;
 int sep=30;//メッシュを切る定数
 
 border ba(t=0,1){x=(4*t-1)*L;y=-L;label=slide;};//下
@@ -118,8 +154,8 @@ int2d(Th)(u1*v1+u2*v2
     )
 -int2d(Th)(convect([up1,up2],-dt,up1)*v1+convect([up1,up2],-dt,up2)*v2)
     +on(slide,u2=0.0)
-    +on(inflow,u1=zt,u2=0.0)
-    +on(wall,u1=0.0,u2=0.0);
+    +on(inflow,u1=1.0,u2=0.0)
+    +on(wall,u1=-zt*y,u2=zt*x);
 /*---------------------------------------------------------------*/
 
 [u1,u2]=[0,0];//初期条件
@@ -131,40 +167,46 @@ int k=0;//データ番号
 matrix AnswerReservoirMatrix(DataLength+1,3*S+1);//Matrix for Prediction Value
 ofstream ReservoirMatrixOut("Dataset/input="+string(inputnumber)+"/Re="+string(Re)+"/MatrixRe"+string(Re)+"Input"+string(inputnumber)+".csv");
 
+/*---------------------------------------入力データの作成---------------------------------------*/
+real[int] Z=inputdata(inputnumber);//入力データ
+real[int] Y=Answer(n,inputnumber);//正解データ
+real[int] Yin=scaleNARMA(n,DataLength,Y);//正解データの正規化
+/*-------------------------------------------------------------------------------------------*/
+
 //流体の計算
 for(real i=0;i<=Tf;i+=dt){
-    zt=NARMA(k);//入力をNARMAにする
+    zt=Yin[k];//入力をNARMAにする
     // zt=1.0;
     cout<<k<<","<<i<<endl;
     cout<<"Re="<<Re<<endl;
-    cout<<"input="<<NARMA(k)<<endl;
-    cout<<"input_number="<<inputnumber<<endl;
+    cout<<"input="<<zt<<endl;
+    // cout<<"input_number="<<inputnumber<<endl;
 
     //流体の計算反復
     [up1,up2]=[u1,u2];
     NS; 
     //データをとる
     if(abs(i-(k+1)*tau)<10.e-5){//データを取る時刻の設定,tauの倍数の時にデータが取られる
-        //各時刻における座標の取得.座標の指定
-        ofstream ReservoirMatrixOut("Dataset/input="+string(inputnumber)+"/Re="+string(Re)+"/MatrixRe"+string(Re)+"Input"+string(inputnumber)+".csv",append);
-        AnswerReservoirMatrix(k,0)=1.0;
-        // データの書き込み
-        ReservoirMatrixOut<<1.0;
-        for(int number=0;number<S;number++){
-            real x1=number%11+0.5;
-            real y1=int(number/11)-3;   
-            AnswerReservoirMatrix(k,3*number+1)=u1(x1,y1);//x_k^{3l+1}
-            AnswerReservoirMatrix(k,3*number+2)=u2(x1,y1);//x_k^{3l+2}
-            AnswerReservoirMatrix(k,3*number+3)=p(x1,y1);//x_k^{3l+3}
-            //データの書き込み
-            ReservoirMatrixOut<<","<<u1(x1,y1)<<","<<u2(x1,y1)<<","<<p(x1,y1);
-        }
-        ReservoirMatrixOut<<endl;
+        // //各時刻における座標の取得.座標の指定
+        // ofstream ReservoirMatrixOut("Dataset/input="+string(inputnumber)+"/Re="+string(Re)+"/MatrixRe"+string(Re)+"Input"+string(inputnumber)+".csv",append);
+        // AnswerReservoirMatrix(k,0)=1.0;
+        // // データの書き込み
+        // ReservoirMatrixOut<<1.0;
+        // for(int number=0;number<S;number++){
+        //     real x1=number%11+0.5;
+        //     real y1=int(number/11)-3;   
+        //     AnswerReservoirMatrix(k,3*number+1)=u1(x1,y1);//x_k^{3l+1}
+        //     AnswerReservoirMatrix(k,3*number+2)=u2(x1,y1);//x_k^{3l+2}
+        //     AnswerReservoirMatrix(k,3*number+3)=p(x1,y1);//x_k^{3l+3}
+        //     //データの書き込み
+        //     ReservoirMatrixOut<<","<<u1(x1,y1)<<","<<u2(x1,y1)<<","<<p(x1,y1);
+        // }
+        // ReservoirMatrixOut<<endl;
         k+=1;//取るデータを更新
     }
     //結果の表示
     // plot(p,grey=true,fill=true);
-    // plot([u1,u2],fill=true,grey=true);//ps="Move_cylinder/"+filename+".ps");
+    plot([u1,u2],fill=true,grey=true);//ps="Move_cylinder/"+filename+".ps");
 }
 
 
